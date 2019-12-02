@@ -1,0 +1,4 @@
+trained_models/*
+__pycache__
+.idea/*
+
