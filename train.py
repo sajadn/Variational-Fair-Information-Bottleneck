@@ -306,7 +306,7 @@ def main():
         dir = 'trained_models/' + config.model_name + '/' + config.dataset + '/' + str(datetime.datetime.now()).replace(" ", "-") +\
               "_" + config.model_name + '/'
 
-        os.mkdirs(dir, exist_ok=True)
+        os.makedirs(dir, exist_ok=True)
 
         for (data, label) in test_loader:
             data = data.double().cuda()
