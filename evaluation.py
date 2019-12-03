@@ -1,12 +1,18 @@
 import os
 import numpy as np
+import sys
+
+
 
 d = {'test acc label': [],
      'test acc sens':  [],
      'test acc label deter': [],
      'test acc sens deter': []}
 
-directory = 'trained_models/VFAE/mnist/'
+model_name = sys.argv[1]
+dataset_name = sys.argv[2]
+
+directory = 'trained_models/' + model_name + '/' + dataset_name + '/'
 
 file_num = 0
 for filename in os.listdir(directory):

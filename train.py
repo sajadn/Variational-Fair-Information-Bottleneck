@@ -67,28 +67,23 @@ def main():
 
     config = parser.parse_args()
 
-    if config.model_name == 'VFIB':
-        beta = 1
-    elif config.model_name == 'VFAE':
-        beta = 1
-    elif config.model_name == 'LCFR':
-        beta = 1
-    elif config.model_name == 'VAE':
-        beta = 1
-    elif config.model_name == 'VFIBG':
-        beta = 50
-        beta2 = 50
+    beta = 1
 
     if config.dataset == 'mnist':
         train_data, train_label, test_data, test_label = load_mnist()
     elif config.dataset == 'adult':
         train_data, train_label, test_data, test_label = load_adult()
-        if config.model_name is not "VFIB":
-            threshold = [38.64, 189664.13, 10.07, 1079.06, 87.502314, 40.422382]
-            for i in range(len(threshold)):
-                train_data[:, i] = (train_data[:, i] > threshold[i]).double()
-                test_data[:, i] = (test_data[:, i] > threshold[i]).double()
-            print(train_data[:10])
+        print(config.model_name)
+        threshold = [38.64, 189664.13, 10.07, 1079.06, 87.502314, 40.422382]
+
+        # if config.model_name == "VFIB":
+        #     train_data[:, 0] = (train_data[:, 0] > threshold[0]).double()
+        #     test_data[:, 0] = (test_data[:, 0] > threshold[0]).double()
+        # else:
+        for i in range(len(threshold)):
+            train_data[:, i] = (train_data[:, i] > threshold[i]).double()
+            test_data[:, i] = (test_data[:, i] > threshold[i]).double()
+        print(train_data[:10])
 
     config.input_size = 109 if config.dataset == 'adult' else 784
     config.sensitive_attr = 0 if config.dataset == 'adult' else -1
@@ -146,21 +141,6 @@ def main():
                     if config.with_mmd:
                         loss += mmd_loss
 
-                if config.model_name == 'VFIBG':
-
-                    q_z_mean, q_z_log_sigma = model.encoder(data)
-                    z = reparam(q_z_mean, q_z_log_sigma)
-                    pred_mean = model.classifier(torch.cat((z, sens_attr), dim=1))
-
-                    classifier_loss = negative_log_bernoulli(label, pred_mean)
-
-                    kl_loss = KL(q_z_mean, q_z_log_sigma)
-
-                    reconst = model.decoder(torch.cat((z, sens_attr), dim=1))
-                    reconst_loss = negative_log_bernoulli(data[:, :-1], reconst)
-
-                    loss = beta * kl_loss + beta2*classifier_loss + reconst_loss
-
                 elif config.model_name == 'LCFR': #Unsupervised version of VFAE
                     q_z_mean, q_z_log_sigma = model.encoder(data)
                     z = reparam(q_z_mean, q_z_log_sigma)
@@ -212,7 +192,7 @@ def main():
                 optimizer.step()
                 # beta += 0.1
             print('batch loss:', loss)
-            if config.model_name is not 'VAE' and config.model_name is not 'LCFR':
+            if (not config.model_name == 'VAE') and (not config.model_name == 'LCFR'):
                 counts = ((pred_mean.detach() > 0.5).double() == label).double()
                 print('batch accuracy:', torch.mean(counts))
 
@@ -242,10 +222,10 @@ def main():
                 label_sens = data[:, config.sensitive_attr].unsqueeze(1)
                 # print('label sens shape', label_sens.shape)
 
-                q_z_mean, q_z_log_variance = model.encoder(data)
+                q_z_mean, q_z_log_sigma = model.encoder(data)
                 q_z_mean = q_z_mean.detach()
-                q_z_log_variance = q_z_log_variance.detach()
-                z = reparam(q_z_mean, q_z_log_variance)
+                q_z_log_sigma = q_z_log_sigma.detach()
+                z = reparam(q_z_mean, q_z_log_sigma)
 
                 pred_label_deter = test_classifier_deter(q_z_mean)
                 pred_sens_deter = sens_classifier_deter(q_z_mean)
@@ -316,7 +296,7 @@ def main():
 
             q_z_mean, q_z_log_sigma = model.encoder(data)
             q_z_mean = q_z_mean.detach()
-            q_z_log_variance = q_z_log_variance.detach()
+            q_z_log_sigma = q_z_log_sigma.detach()
             z = reparam(q_z_mean, q_z_log_sigma)
 
             # Prediction
@@ -352,7 +332,7 @@ def main():
                 file.write(str(config))
 
             rcParams['figure.figsize'] = 10, 10
-            if datasets == 'mnist':
+            if config.dataset == 'mnist':
                 reconst = sigmoid(test_decoder(z[:64]).detach())
                 reconst_sens = sigmoid(test_decoder_sens(torch.cat((z[:64], label_sens[:64]), dim=1)).detach())
 
