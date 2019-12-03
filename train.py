@@ -66,7 +66,8 @@ def main():
     parser.add_argument('--sensitive_attr', default=-1, type=int)
 
     config = parser.parse_args()
-
+    config.input_size = 109 if config.dataset == 'adult' else 784
+    config.sensitive_attr = 0 if config.dataset == 'adult' else -1
     beta = 1
 
     if config.dataset == 'mnist':
@@ -75,18 +76,11 @@ def main():
         train_data, train_label, test_data, test_label = load_adult()
         print(config.model_name)
         threshold = [38.64, 189664.13, 10.07, 1079.06, 87.502314, 40.422382]
-
-        # if config.model_name == "VFIB":
-        #     train_data[:, 0] = (train_data[:, 0] > threshold[0]).double()
-        #     test_data[:, 0] = (test_data[:, 0] > threshold[0]).double()
-        # else:
         for i in range(len(threshold)):
             train_data[:, i] = (train_data[:, i] > threshold[i]).double()
             test_data[:, i] = (test_data[:, i] > threshold[i]).double()
         print(train_data[:10])
 
-    config.input_size = 109 if config.dataset == 'adult' else 784
-    config.sensitive_attr = 0 if config.dataset == 'adult' else -1
 
     train_dataset = data_utils.TensorDataset(train_data, train_label)
     test_dataset = data_utils.TensorDataset(test_data, test_label)
@@ -362,6 +356,8 @@ def main():
             plt.savefig(dir+'latent')
 
             torch.save(model, dir+'model')
+
+            plt.cla()
 
 
 if __name__ == '__main__':
