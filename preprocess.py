@@ -71,5 +71,26 @@ def load_adult():
            torch.from_numpy(test_label.reshape(-1, 1))
 
 
+def load_mnist():
+    train_data = np.load('data/mnist/image_train.npy').reshape(-1, 784)
+    train_label = np.load('data/mnist/label_train.npy')
+    train_color = np.load('data/mnist/color_train.npy')
+
+    test_data = np.load('data/mnist/image_test.npy').reshape(-1, 784)
+    test_label = np.load('data/mnist/label_test.npy')
+    test_color = np.load('data/mnist/color_test.npy')
+
+    # test_data
+    test_data = torch.stack([torch.Tensor(i).double() for i in test_data])
+    test_color = torch.from_numpy(test_color).unsqueeze(1)
+    test_data = torch.cat((test_data, test_color.double()), dim=1)
+    test_label = torch.from_numpy(test_label == 2).double().unsqueeze(1)
+
+    # train_data
+    train_data = torch.stack([torch.Tensor(i).double() for i in train_data])
+    train_color = torch.from_numpy(train_color).unsqueeze(1)
+    train_data = torch.cat((train_data, train_color.double()), dim=1)
+    train_label = torch.from_numpy(train_label == 2).double().unsqueeze(1)
+    return train_data, train_label, test_data, test_label
 
 

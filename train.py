@@ -22,33 +22,12 @@ import torch.nn as nn
 import datetime
 import argparse
 import os
-from preprocess_adult import load_adult
+from preprocess import load_adult, load_mnist
 
 def imshow(img):
     plt.imshow(np.transpose(img.cpu().numpy(), (1, 2, 0)))
 
 
-def load_mnist():
-    train_data = np.load('data/mnist/image_train.npy').reshape(-1, 784)
-    train_label = np.load('data/mnist/label_train.npy')
-    train_color = np.load('data/mnist/color_train.npy')
-
-    test_data = np.load('data/mnist/image_test.npy').reshape(-1, 784)
-    test_label = np.load('data/mnist/label_test.npy')
-    test_color = np.load('data/mnist/color_test.npy')
-
-    # test_data
-    test_data = torch.stack([torch.Tensor(i).double() for i in test_data])
-    test_color = torch.from_numpy(test_color).unsqueeze(1)
-    test_data = torch.cat((test_data, test_color.double()), dim=1)
-    test_label = torch.from_numpy(test_label == 2).double().unsqueeze(1)
-
-    # train_data
-    train_data = torch.stack([torch.Tensor(i).double() for i in train_data])
-    train_color = torch.from_numpy(train_color).unsqueeze(1)
-    train_data = torch.cat((train_data, train_color.double()), dim=1)
-    train_label = torch.from_numpy(train_label == 2).double().unsqueeze(1)
-    return train_data, train_label, test_data, test_label
 
 
 def main():
@@ -133,7 +112,7 @@ def main():
                     loss = beta * kl_loss + classifier_loss
 
                     if config.with_mmd:
-                        loss += mmd_loss
+                        loss -= 20*mmd_loss
 
                 elif config.model_name == 'LCFR': #Unsupervised version of VFAE
                     q_z_mean, q_z_log_sigma = model.encoder(data)
@@ -152,6 +131,7 @@ def main():
                     # reconst_loss = torch.sum((data[:, :-1] - reconst)**2, dim=1).mean()
                     kl_loss = KL(q_z_mean, q_z_log_sigma)
                     loss = beta * kl_loss + reconst_loss
+
 
                 elif config.model_name == 'VFAE':
                     q_z_mean, q_z_log_sigma = model.encoder(data)
@@ -179,7 +159,7 @@ def main():
                     loss = reconst_loss + kl_loss + reconst_z_loss - entropy_z + beta*classifier_loss
 
                     if config.with_mmd:
-                        loss += mmd_loss
+                        loss -= 20*mmd_loss
 
                 model.zero_grad()
                 loss.backward()
@@ -195,9 +175,6 @@ def main():
         test_classifier = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
         sens_classifier = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
 
-        test_classifier_deter = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
-        sens_classifier_deter = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
-
         test_decoder = nn.Sequential(nn.Linear(config.latent_size, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double().cuda()
         test_decoder_sens = nn.Sequential(nn.Linear(config.latent_size+1, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double().cuda()
 
@@ -205,8 +182,6 @@ def main():
         optimizer_sens = torch.optim.Adam(sens_classifier.parameters(), lr=config.lr)
         optimizer_decoder = torch.optim.Adam(test_decoder.parameters(), lr=config.lr)
         optimizer_decoder_sens = torch.optim.Adam(test_decoder_sens.parameters(), lr=config.lr)
-        optimizer_label_deter = torch.optim.Adam(test_classifier_deter.parameters(), lr=config.lr)
-        optimizer_sens_deter = torch.optim.Adam(sens_classifier_deter.parameters(), lr=config.lr)
 
         for epoch_number in range(config.test_epochs):
             print('epoch number:', epoch_number)
@@ -221,9 +196,6 @@ def main():
                 q_z_log_sigma = q_z_log_sigma.detach()
                 z = reparam(q_z_mean, q_z_log_sigma)
 
-                pred_label_deter = test_classifier_deter(q_z_mean)
-                pred_sens_deter = sens_classifier_deter(q_z_mean)
-
                 pred_label = test_classifier(z)
                 pred_sens = sens_classifier(z)
 
@@ -235,8 +207,6 @@ def main():
                 label_loss = negative_log_bernoulli(label, pred_label)
                 sens_loss = negative_log_bernoulli(label_sens, pred_sens)
 
-                label_loss_deter = negative_log_bernoulli(label, pred_label_deter)
-                sens_loss_deter = negative_log_bernoulli(label_sens, pred_sens_deter)
 
                 reconst_loss = negative_log_bernoulli(data[:, :-1], reconst)
                 reconst_sens_loss = negative_log_bernoulli(data[:, :-1], reconst_sens)
@@ -245,9 +215,6 @@ def main():
                 optimizer_label.zero_grad()
                 optimizer_sens.zero_grad()
 
-                optimizer_label_deter.zero_grad()
-                optimizer_sens_deter.zero_grad()
-
                 optimizer_decoder.zero_grad()
                 optimizer_decoder_sens.zero_grad()
 
@@ -255,18 +222,12 @@ def main():
                 label_loss.backward()
                 sens_loss.backward()
 
-                label_loss_deter.backward()
-                sens_loss_deter.backward()
-
                 reconst_loss.backward()
                 reconst_sens_loss.backward()
 
                 # optimizers step
                 optimizer_label.step()
                 optimizer_sens.step()
-
-                optimizer_label_deter.step()
-                optimizer_sens_deter.step()
 
                 optimizer_decoder.step()
                 optimizer_decoder_sens.step()
@@ -297,30 +258,18 @@ def main():
             pred_label = test_classifier(z)
             pred_sens = sens_classifier(z)
 
-            pred_label_deter = test_classifier_deter(q_z_mean)
-            pred_sens_deter = sens_classifier_deter(q_z_mean)
-
-            acc_label_deter = torch.mean(((sigmoid(pred_label_deter).detach() > 0.5).double() == label).double())
-            acc_sens_deter = torch.mean(((sigmoid(pred_sens_deter).detach() > 0.5).double() == label_sens).double())
-
             acc_label = torch.mean(((sigmoid(pred_label).detach() > 0.5).double() == label).double())
             acc_sens = torch.mean(((sigmoid(pred_sens).detach() > 0.5).double() == label_sens).double())
 
             print('test acc label:', acc_label)
             print('test acc sens:', acc_sens)
 
-            print('test acc label deter:', acc_label_deter)
-            print('test acc sens deter:', acc_sens_deter)
 
             with open(dir+"evaluation.txt", "w") as file:
                 acc_label_txt = 'test acc label: ' + str(acc_label.item())
                 acc_sens_txt = 'test acc sens: ' + str(acc_sens.item())
-                acc_label_txt_deter = 'test acc label deter: ' + str(acc_label_deter.item())
-                acc_sens_txt_deter = 'test acc sens deter: ' + str(acc_sens_deter.item())
                 file.write(acc_label_txt +
-                           '\n' + acc_sens_txt +
-                           '\n' + acc_label_txt_deter +
-                           '\n' + acc_sens_txt_deter)
+                           '\n' + acc_sens_txt)
 
             with open(dir+"config.txt", "w") as file:
                 file.write(str(config))
