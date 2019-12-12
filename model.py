@@ -21,7 +21,7 @@ class Model(nn.Module):
             self.classifier = nn.Sequential(nn.Linear(latent_size, 1))
             self.reconst_model_z = nn.Sequential(nn.Linear(latent_size+1, 100), nn.Tanh(), nn.Linear(100, latent_size*2))
             self.decoder = nn.Sequential(nn.Linear(latent_size+1, 100), nn.Tanh(), nn.Linear(100, input_size))
-        elif model_name == 'VFIB':
+        elif model_name == 'VFIB' or model_name == 'supervised':
             self.classifier = nn.Sequential(nn.Linear(latent_size + 1, 1))
         elif model_name == 'LCFR': #Unsupervised version of VFAE
             self.decoder = nn.Sequential(nn.Linear(latent_size+1, 100), nn.Tanh(), nn.Linear(100, input_size))

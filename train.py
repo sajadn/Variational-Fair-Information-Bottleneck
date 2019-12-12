@@ -43,11 +43,13 @@ def main():
     parser.add_argument('--train_num', default=1, type=int)
     parser.add_argument('--dataset', default='mnist', type=str)
     parser.add_argument('--sensitive_attr', default=-1, type=int)
+    parser.add_argument('--beta', default=1, type=int)
+    parser.add_argument('--beta_mmd', default=1, type=int)
+
 
     config = parser.parse_args()
     config.input_size = 109 if config.dataset == 'adult' else 784
     config.sensitive_attr = 0 if config.dataset == 'adult' else -1
-    beta = 1
 
     if config.dataset == 'mnist':
         train_data, train_label, test_data, test_label = load_mnist()
@@ -97,7 +99,7 @@ def main():
                 # imshow(torchvision.utils.make_grid(data[:128, :-1].view(128, 1, 28, 28)))
                 # plt.show()
 
-                if config.model_name == 'VFIB': #Proposed
+                if config.model_name == 'VFIB' or config.model_name=='supervised': #Proposed
                     q_z_mean, q_z_log_sigma = model.encoder(data)
                     z = reparam(q_z_mean, q_z_log_sigma)
                     pred_mean = model.classifier(torch.cat((z, sens_attr), dim=1))
@@ -109,10 +111,12 @@ def main():
 
                     mmd_loss = kernel(z_s_0, z_s_0) + kernel(z_s_1, z_s_1) - 2 * kernel(z_s_0, z_s_1)
 
-                    loss = beta * kl_loss + classifier_loss
+                    loss = classifier_loss
 
                     if config.with_mmd:
-                        loss -= 20*mmd_loss
+                        loss += config.beta_mmd*mmd_loss
+                    if config.model_name != 'supervised':
+                        loss += kl_loss*config.beta
 
                 elif config.model_name == 'LCFR': #Unsupervised version of VFAE
                     q_z_mean, q_z_log_sigma = model.encoder(data)
@@ -156,10 +160,10 @@ def main():
                     z_s_1 = z[~sens_attr.bool().squeeze(), :]
                     mmd_loss = kernel(z_s_0, z_s_0) + kernel(z_s_1, z_s_1) - 2 * kernel(z_s_0, z_s_1)
 
-                    loss = reconst_loss + kl_loss + reconst_z_loss - entropy_z + beta*classifier_loss
+                    loss = reconst_loss + kl_loss + reconst_z_loss - entropy_z + config.beta*classifier_loss
 
                     if config.with_mmd:
-                        loss -= 20*mmd_loss
+                        loss += config.beta_mmd*mmd_loss
 
                 model.zero_grad()
                 loss.backward()
@@ -175,13 +179,13 @@ def main():
         test_classifier = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
         sens_classifier = nn.Sequential(nn.Linear(config.latent_size, 1)).double().cuda()
 
-        test_decoder = nn.Sequential(nn.Linear(config.latent_size, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double().cuda()
-        test_decoder_sens = nn.Sequential(nn.Linear(config.latent_size+1, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double().cuda()
+        # test_decoder = nn.Sequential(nn.Linear(config.latent_size, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double()#.cuda()
+        # test_decoder_sens = nn.Sequential(nn.Linear(config.latent_size+1, 100), nn.Tanh(), nn.Linear(100, config.input_size)).double()#.cuda()
 
         optimizer_label = torch.optim.Adam(test_classifier.parameters(), lr=config.lr)
         optimizer_sens = torch.optim.Adam(sens_classifier.parameters(), lr=config.lr)
-        optimizer_decoder = torch.optim.Adam(test_decoder.parameters(), lr=config.lr)
-        optimizer_decoder_sens = torch.optim.Adam(test_decoder_sens.parameters(), lr=config.lr)
+        # optimizer_decoder = torch.optim.Adam(test_decoder.parameters(), lr=config.lr)
+        # optimizer_decoder_sens = torch.optim.Adam(test_decoder_sens.parameters(), lr=config.lr)
 
         for epoch_number in range(config.test_epochs):
             print('epoch number:', epoch_number)
@@ -199,8 +203,8 @@ def main():
                 pred_label = test_classifier(z)
                 pred_sens = sens_classifier(z)
 
-                reconst = test_decoder(z)
-                reconst_sens = test_decoder_sens(torch.cat((z, label_sens), dim=1))
+                # reconst = test_decoder(z)
+                # reconst_sens = test_decoder_sens(torch.cat((z, label_sens), dim=1))
                 # print(pred_label.shape)
                 # print(pred_sens.shape)
 
@@ -208,29 +212,29 @@ def main():
                 sens_loss = negative_log_bernoulli(label_sens, pred_sens)
 
 
-                reconst_loss = negative_log_bernoulli(data[:, :-1], reconst)
-                reconst_sens_loss = negative_log_bernoulli(data[:, :-1], reconst_sens)
+                # reconst_loss = negative_log_bernoulli(data[:, :-1], reconst)
+                # reconst_sens_loss = negative_log_bernoulli(data[:, :-1], reconst_sens)
 
                 # optimizers
                 optimizer_label.zero_grad()
                 optimizer_sens.zero_grad()
 
-                optimizer_decoder.zero_grad()
-                optimizer_decoder_sens.zero_grad()
+                # optimizer_decoder.zero_grad()
+                # optimizer_decoder_sens.zero_grad()
 
                 # backward
                 label_loss.backward()
                 sens_loss.backward()
 
-                reconst_loss.backward()
-                reconst_sens_loss.backward()
+                # reconst_loss.backward()
+                # reconst_sens_loss.backward()
 
                 # optimizers step
                 optimizer_label.step()
                 optimizer_sens.step()
 
-                optimizer_decoder.step()
-                optimizer_decoder_sens.step()
+                # optimizer_decoder.step()
+                # optimizer_decoder_sens.step()
 
             acc_label = torch.mean(((sigmoid(pred_label).detach() > 0.5).double() == label).double())
             acc_sens = torch.mean(((sigmoid(pred_sens).detach() > 0.5).double() == label_sens).double())
@@ -239,7 +243,7 @@ def main():
             print('last train batch acc_sens:', acc_sens)
 
         dir = 'trained_models/' + config.model_name + '/' + config.dataset + '/' + str(datetime.datetime.now()).replace(" ", "-") +\
-              "_" + config.model_name + '/'
+              "_" + config.model_name + '_beta=' + str(config.beta) + '_beta_mmd=' + str(config.beta_mmd) + '/'
 
         os.makedirs(dir, exist_ok=True)
 
@@ -261,33 +265,39 @@ def main():
             acc_label = torch.mean(((sigmoid(pred_label).detach() > 0.5).double() == label).double())
             acc_sens = torch.mean(((sigmoid(pred_sens).detach() > 0.5).double() == label_sens).double())
 
+            predicted_label = sigmoid(pred_label)
+            disct1 = torch.mean(predicted_label[label_sens.bool().squeeze(), :])
+            disct2 = torch.mean(predicted_label[~label_sens.bool().squeeze(), :])
+
             print('test acc label:', acc_label)
             print('test acc sens:', acc_sens)
-
+            print('discrimination', torch.abs(disct1-disct2))
 
             with open(dir+"evaluation.txt", "w") as file:
                 acc_label_txt = 'test acc label: ' + str(acc_label.item())
                 acc_sens_txt = 'test acc sens: ' + str(acc_sens.item())
+                disc_txt = 'disct value:' + str(torch.abs(disct2-disct1).item())
                 file.write(acc_label_txt +
-                           '\n' + acc_sens_txt)
+                           '\n' + acc_sens_txt +
+                           '\n' + disc_txt)
 
             with open(dir+"config.txt", "w") as file:
                 file.write(str(config))
 
             rcParams['figure.figsize'] = 10, 10
-            if config.dataset == 'mnist':
-                reconst = sigmoid(test_decoder(z[:64]).detach())
-                reconst_sens = sigmoid(test_decoder_sens(torch.cat((z[:64], label_sens[:64]), dim=1)).detach())
+            # if config.dataset == 'mnist':
+                # reconst = sigmoid(test_decoder(z[:64]).detach())
+                # reconst_sens = sigmoid(test_decoder_sens(torch.cat((z[:64], label_sens[:64]), dim=1)).detach())
 
-                plt.subplot(311)
-                imshow(torchvision.utils.make_grid(data[:64, :-1].view(64, 1, 28, 28)))
-
-                plt.subplot(312)
-                imshow(torchvision.utils.make_grid(reconst.view(64, 1, 28, 28)))
-
-                plt.subplot(313)
-                imshow(torchvision.utils.make_grid(reconst_sens.view(64, 1, 28, 28)))
-                plt.savefig(dir+'reconst')
+                # plt.subplot(311)
+                # imshow(torchvision.utils.make_grid(data[:64, :-1].view(64, 1, 28, 28)))
+                #
+                # plt.subplot(312)
+                # imshow(torchvision.utils.make_grid(reconst.view(64, 1, 28, 28)))
+                #
+                # plt.subplot(313)
+                # imshow(torchvision.utils.make_grid(reconst_sens.view(64, 1, 28, 28)))
+                # plt.savefig(dir+'reconst')
 
             embeded_data = TSNE(n_components=2).fit_transform(q_z_mean[:2000].detach().cpu().numpy())
             colors_label = np.array(['orange', 'green'])
@@ -306,6 +316,9 @@ def main():
 
             torch.save(model, dir+'model')
 
+            plt.subplot(211)
+            plt.cla()
+            plt.subplot(212)
             plt.cla()
 
 
